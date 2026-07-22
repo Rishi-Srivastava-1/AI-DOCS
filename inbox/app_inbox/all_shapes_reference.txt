@@ -1,0 +1,235 @@
+================================================================================
+  App Inbox Binary Protocol — All Four Notification Shapes
+================================================================================
+
+  Decision tree:
+    targetId NEGATIVE → personalisations follow
+    targetId POSITIVE → no personalisations
+    epoch NEGATIVE    → variant byte follows
+    epoch POSITIVE    → no variant
+
+  Per-personalisation entry (always same structure):
+    [propId: 2 bytes unsigned short] [valueLen: 1 byte] [value: valueLen bytes UTF-8]
+
+================================================================================
+  SHAPE A — No variant, No personalisations (MINIMUM: 8 bytes)
+================================================================================
+
+  When: profileVariant = -1 (default), no event properties
+
+  Full notification (targetId=42, epoch=1709596800, no variant, no personalisations)
+
+  [00 00 00 2A]                                ← targetId = +42 (positive = no pers)
+  [65 E5 D8 00]                                ← epoch = +1709596800 (positive = no variant)
+
+  Total: 4 + 4 = 8 bytes
+
+  Visual layout:
+
+  Offset  Bytes                          Field
+  ------  -----                          -----
+  0-3     00 00 00 2A                    targetId = +42 (positive = no pers)
+  4-7     65 E5 D8 00                    epoch = +1709596800 (positive = no variant)
+
+
+================================================================================
+  SHAPE B — Has variant, No personalisations (9 bytes)
+================================================================================
+
+  When: A/B test or profile variant assigned, no event properties
+  Example: User gets "Variant B" (variant=2), PBS campaign with no event placeholders
+
+  pivotKeyToIDMap in MongoDB: {"0": "wzrk_default", "1": "Variant A", "2": "Variant B"}
+  NB looks up "Variant B" → key "2" → parseInt("2") → profileVariant = 2
+
+  Full notification (targetId=42, epoch=1709596800, variant=2, no personalisations)
+
+  [00 00 00 2A]                                ← targetId = +42 (positive = no pers)
+  [9A 1A 28 00]                                ← epoch = -1709596800 (negative = has variant)
+  [02]                                         ← variant = 2 ("Variant B")
+
+  Total: 4 + 4 + 1 = 9 bytes
+
+  Visual layout:
+
+  Offset  Bytes                          Field
+  ------  -----                          -----
+  0-3     00 00 00 2A                    targetId = +42 (positive = no pers)
+  4-7     9A 1A 28 00                    epoch = -1709596800 (negative = has variant)
+  8       02                             variant = 2 ("Variant B")
+
+
+================================================================================
+  SHAPE C — No variant, Has personalisations (10+ bytes)
+================================================================================
+
+  When: Event-triggered campaign with event placeholders, no A/B test
+  Example: Inaction campaign with template:
+    "You bought {{ Event.productName }} for {{ Event.price }} in {{ Event.city }}"
+
+  Event properties at dispatch:
+    productName (propId=11) = "iPhone"
+    price (propId=7)        = "$999"
+    city (propId=20)        = "Mumbai"
+
+  Full notification (targetId=42, epoch=1709596800, no variant, 3 personalisations)
+
+  [FF FF FF D6]                                ← targetId = -42 (negative = has pers)
+  [65 E5 D8 00]                                ← epoch = +1709596800 (positive = no variant)
+  [03]                                         ← count = 3
+  [00 0B] [06] [69 50 68 6F 6E 65]            ← 11:"iPhone"   (2 + 1 + 6 = 9 bytes)
+  [00 07] [04] [24 39 39 39]                  ← 7:"$999"      (2 + 1 + 4 = 7 bytes)
+  [00 14] [06] [4D 75 6D 62 61 69]            ← 20:"Mumbai"   (2 + 1 + 6 = 9 bytes)
+
+  Total: 4 + 4 + 1 + 9 + 7 + 9 = 34 bytes
+
+  Visual layout:
+
+  Offset  Bytes                          Field
+  ------  -----                          -----
+  0-3     FF FF FF D6                    targetId = -42 (negative = has pers)
+  4-7     65 E5 D8 00                    epoch = +1709596800 (positive = no variant)
+  8       03                             count = 3
+  9-10    00 0B                          pers[0].propId = 11
+  11      06                             pers[0].valueLen = 6
+  12-17   69 50 68 6F 6E 65             pers[0].value = "iPhone"
+  18-19   00 07                          pers[1].propId = 7
+  20      04                             pers[1].valueLen = 4
+  21-24   24 39 39 39                    pers[1].value = "$999"
+  25-26   00 14                          pers[2].propId = 20
+  27      06                             pers[2].valueLen = 6
+  28-33   4D 75 6D 62 61 69             pers[2].value = "Mumbai"
+
+
+================================================================================
+  SHAPE D — Has variant AND personalisations (11+ bytes, MAXIMUM COMPLEXITY)
+================================================================================
+
+  When: A/B test campaign with event placeholders on event-triggered campaign
+  Example: Same template as Shape C but user gets "Variant B" (variant=2)
+
+  Full notification (targetId=42, epoch=1709596800, variant=2, 3 personalisations)
+
+  [FF FF FF D6]                                ← targetId = -42 (negative = has pers)
+  [9A 1A 28 00]                                ← epoch = -1709596800 (negative = has variant)
+  [02]                                         ← variant = 2 ("Variant B")
+  [03]                                         ← count = 3
+  [00 0B] [06] [69 50 68 6F 6E 65]            ← 11:"iPhone"   (2 + 1 + 6 = 9 bytes)
+  [00 07] [04] [24 39 39 39]                  ← 7:"$999"      (2 + 1 + 4 = 7 bytes)
+  [00 14] [06] [4D 75 6D 62 61 69]            ← 20:"Mumbai"   (2 + 1 + 6 = 9 bytes)
+
+  Total: 4 + 4 + 1 + 1 + 9 + 7 + 9 = 35 bytes
+
+  Visual layout:
+
+  Offset  Bytes                          Field
+  ------  -----                          -----
+  0-3     FF FF FF D6                    targetId = -42 (negative = has pers)
+  4-7     9A 1A 28 00                    epoch = -1709596800 (negative = has variant)
+  8       02                             variant = 2 ("Variant B")
+  9       03                             count = 3
+  10-11   00 0B                          pers[0].propId = 11
+  12      06                             pers[0].valueLen = 6
+  13-18   69 50 68 6F 6E 65             pers[0].value = "iPhone"
+  19-20   00 07                          pers[1].propId = 7
+  21      04                             pers[1].valueLen = 4
+  22-25   24 39 39 39                    pers[1].value = "$999"
+  26-27   00 14                          pers[2].propId = 20
+  28      06                             pers[2].valueLen = 6
+  29-34   4D 75 6D 62 61 69             pers[2].value = "Mumbai"
+
+
+================================================================================
+  MULTIPLE NOTIFICATIONS IN ONE BLOB
+================================================================================
+
+  Two notifications appended (user hasn't opened app, two campaigns dispatched):
+
+  Notification 1: Shape D (35 bytes) — campaign 42, variant=2, 3 personalisations
+  Notification 2: Shape A (8 bytes)  — campaign 99, no variant, no personalisations
+
+  [FF FF FF D6] [9A 1A 28 00] [02] [03] [00 0B 06 69 50 68 6F 6E 65] [00 07 04 24 39 39 39] [00 14 06 4D 75 6D 62 61 69] [00 00 00 63] [65 E6 6B 80]
+  |<========================= Notification 1 (35 bytes) ===============================>|  |<== Notification 2 (8 bytes) ==>|
+
+  No separator between notifications. Decoder must parse Notification 1 fully
+  to know where Notification 2 starts.
+
+  Visual layout:
+
+  Offset  Bytes                          Field
+  ------  -----                          -----
+  --- Notification 1 (campaign 42) ---
+  0-3     FF FF FF D6                    targetId = -42 (has pers)
+  4-7     9A 1A 28 00                    epoch = -1709596800 (has variant)
+  8       02                             variant = 2
+  9       03                             count = 3
+  10-11   00 0B                          pers[0].propId = 11
+  12      06                             pers[0].valueLen = 6
+  13-18   69 50 68 6F 6E 65             pers[0].value = "iPhone"
+  19-20   00 07                          pers[1].propId = 7
+  21      04                             pers[1].valueLen = 4
+  22-25   24 39 39 39                    pers[1].value = "$999"
+  26-27   00 14                          pers[2].propId = 20
+  28      06                             pers[2].valueLen = 6
+  29-34   4D 75 6D 62 61 69             pers[2].value = "Mumbai"
+  --- Notification 2 (campaign 99) ---
+  35-38   00 00 00 63                    targetId = +99 (no pers)
+  39-42   65 E6 6B 80                    epoch = +1709600000 (no variant)
+
+  Total blob: 35 + 8 = 43 bytes
+
+
+================================================================================
+  SIZE SUMMARY
+================================================================================
+
+  Shape  Variant  Pers   Min bytes  Formula
+  -----  -------  ----   ---------  -------
+  A      No       No     8          4 (targetId) + 4 (epoch)
+  B      Yes      No     9          4 + 4 + 1 (variant)
+  C      No       Yes    10+        4 + 4 + 1 (count) + sum(2+1+N per entry)
+  D      Yes      Yes    11+        4 + 4 + 1 (variant) + 1 (count) + sum(2+1+N per entry)
+
+  Hard limits:
+    Max buffer size:                  10,000 bytes (all notifications combined)
+    Max personalisations per notif:   255 (1 byte count)
+    Max value length per pers:        255 bytes (1 byte valueLen)
+    Max propId:                       65,535 (2 byte unsigned short)
+    Max variant:                      255 (1 byte)
+    Max targetId:                     2,147,483,647 (int31, sign bit used)
+    Max epoch:                        2,147,483,647 (Year 2038 problem!)
+
+
+================================================================================
+  SIGN BIT QUICK REFERENCE
+================================================================================
+
+  targetId:
+    POSITIVE (MSB=0) → no personalisations
+    NEGATIVE (MSB=1) → personalisations block follows
+    Real value: Math.abs(targetId)
+
+  epoch:
+    POSITIVE (MSB=0) → no variant
+    NEGATIVE (MSB=1) → 1-byte variant follows
+    Real value: Math.abs(epoch)
+
+  Encoding (Notification.java:252-258):
+    Utils.encodeInt(hasPersonalisations ? -targetId : targetId, ...)
+    Utils.encodeInt(hasVariant ? -epoch : epoch, ...)
+
+  Decoding (Notification.java:444-458):
+    int targetIdFromStorage = Utils.decodeInt(b, start)  // raw, may be negative
+    int targetId = Math.abs(targetIdFromStorage)          // real value
+    if (targetIdFromStorage < 0) → read personalisations
+    if (epochFromStorage < 0) → read variant
+
+
+================================================================================
+  SOURCE FILES
+================================================================================
+
+  Protocol:     core/inboxstore/src/com/wizrocket/inboxstore/Protocol/Notification.java
+  Utils:        core/inboxstore/src/com/wizrocket/inboxstore/Utils.java
+  NB dispatch:  core/nb/src/com/wizrocket/nb/dispatchers/notificationinbox/NotificationInboxDispatcher.java
+  LC delivery:  core/lc/src/java/com/wizrocket/lc/targeting/InboxManager.java

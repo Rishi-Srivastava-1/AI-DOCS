@@ -1,0 +1,293 @@
+================================================================================
+  Unified Inbox Binary Protocol — All Message Shapes
+================================================================================
+
+  Unlike App Inbox (which uses sign-bit tricks for 4 shapes), Unified Inbox
+  always has the same structure. The variability is:
+  - Whether personalisation block has content or is zero-length
+  - Whether preview content block exists (only if isPreviewMessage)
+
+  All fields use VLQ encoding (variable-length) or INT32 (fixed 4 bytes).
+  All blocks are length-prefixed — reader can skip unknown blocks.
+
+================================================================================
+  ENVELOPE (wraps ALL messages for a user)
+================================================================================
+
+  VLQ  protocolVersion  (currently 0)
+  VLQ  lastMessageId    (auto-incrementing counter)
+  VLQ  messageCount     (number of messages following)
+
+  Example — 2 messages, last ID is 5:
+  [00]    ← protocol version = 0
+  [05]    ← lastMessageId = 5
+  [02]    ← 2 messages follow
+
+================================================================================
+  VLQ ENCODING REFERENCE
+================================================================================
+
+  Variable-Length Quantity: 7 data bits per byte, MSB = continuation flag
+
+  Value      Bytes   Encoding
+  -----      -----   --------
+  0          1       [00]
+  1          1       [01]
+  42         1       [2A]
+  127        1       [7F]
+  128        2       [80 01]
+  300        2       [AC 02]
+  1440       2       [A0 0B]
+  12345      2       [B9 60]
+  100000     3       [A0 8D 06]
+
+================================================================================
+  STRING_OR_NUMBER ENCODING REFERENCE
+================================================================================
+
+  LSB of VLQ header distinguishes type:
+
+  Number N:   VLQ((N << 1) | 1)          ← LSB = 1
+  String S:   VLQ(len(S) << 1) + bytes   ← LSB = 0
+
+  Examples:
+  Number 42:     VLQ((42 << 1)|1) = VLQ(85) = [55]
+  Number 0:      VLQ((0 << 1)|1) = VLQ(1) = [01]
+  String "Hi":   VLQ(2 << 1) = VLQ(4) = [04] [48 69]
+  String "abc":  VLQ(3 << 1) = VLQ(6) = [06] [61 62 63]
+  String "":     VLQ(0) = [00]  ← used as map terminator
+
+================================================================================
+  STATUS BYTE REFERENCE
+================================================================================
+
+  bit 0 (0x01): isRead
+  bit 1 (0x02): isDeliveredOnce
+  bit 7 (0x80): isPreviewMessage
+  bits 2-6:     reserved
+
+  Examples:
+  0x00 = not read, not delivered, not preview
+  0x01 = read
+  0x02 = delivered
+  0x03 = read + delivered
+  0x80 = preview message
+  0x83 = preview + read + delivered
+
+================================================================================
+  SHAPE A — No personalisations, no preview (simplest message)
+================================================================================
+
+  MESSAGE:
+    META_BLOCK:
+      VLQ  blockSize
+      VLQ  messageId
+      INT32  sentTime
+      VLQ  ttlMinutes
+      INT32  targetingId
+      VLQ  targetingVersion
+      VLQ  variant+1
+      BYTE  status
+    PERSONALISATION_BLOCK:
+      VLQ  blockSize = 0   ← empty
+
+  Example: id=1, sentTime=1709596800, ttl=1440min (1day), targetingId=42,
+           targetingVersion=0, variant=-1 (default), not read, not delivered
+
+  Envelope + Message:
+  [00]                              ← protocolVersion = 0
+  [01]                              ← lastMessageId = 1
+  [01]                              ← messageCount = 1
+  --- Message 1 ---
+  [0C]                              ← meta block size = 12 bytes
+    [01]                            ← id = 1
+    [65 E5 D8 00]                   ← sentTime = 1709596800
+    [A0 0B]                         ← ttlMinutes = 1440
+    [00 00 00 2A]                   ← targetingId = 42
+    [00]                            ← targetingVersion = 0
+    [00]                            ← variant + 1 = 0 (variant = -1, default)
+    [00]                            ← status = 0x00 (not read, not delivered)
+  [00]                              ← personalisation block size = 0 (empty)
+
+  Total: 3 (envelope) + 1 (meta len) + 12 (meta) + 1 (pers len) = 17 bytes
+
+
+================================================================================
+  SHAPE B — With variant, no personalisations
+================================================================================
+
+  Same as Shape A but variant is set. Only difference is the variant+1 field.
+
+  Example: same as above but variant=2 ("Variant B"), isRead=true
+
+  [00]                              ← protocolVersion = 0
+  [01]                              ← lastMessageId = 1
+  [01]                              ← messageCount = 1
+  --- Message 1 ---
+  [0C]                              ← meta block size = 12 bytes
+    [01]                            ← id = 1
+    [65 E5 D8 00]                   ← sentTime = 1709596800
+    [A0 0B]                         ← ttlMinutes = 1440
+    [00 00 00 2A]                   ← targetingId = 42
+    [00]                            ← targetingVersion = 0
+    [03]                            ← variant + 1 = 3 (variant = 2)
+    [01]                            ← status = 0x01 (isRead = true)
+  [00]                              ← personalisation block size = 0
+
+  Total: 17 bytes (same as Shape A — variant is always present, just value differs)
+
+
+================================================================================
+  SHAPE C — With personalisations, no preview
+================================================================================
+
+  Example: id=1, targetingId=42, variant=2,
+           personalisations = {0: {3: "Rishi"}, 1: {22: "iPhone"}}
+           (0=Profile, 3=name, 1=Event, 22=productId)
+
+  [00]                              ← protocolVersion = 0
+  [01]                              ← lastMessageId = 1
+  [01]                              ← messageCount = 1
+  --- Message 1 ---
+  [0C]                              ← meta block size = 12 bytes
+    [01]                            ← id = 1
+    [65 E5 D8 00]                   ← sentTime = 1709596800
+    [A0 0B]                         ← ttlMinutes = 1440
+    [00 00 00 2A]                   ← targetingId = 42
+    [00]                            ← targetingVersion = 0
+    [03]                            ← variant + 1 = 3 (variant = 2)
+    [00]                            ← status = 0x00
+  [XX]                              ← personalisation block size (variable)
+    --- Personalisation Map ---
+    [01]                            ← key: number 0 (Profile) — VLQ((0<<1)|1)
+    [03]                            ← value: number 1 (MAP_VALUE_TYPE) — VLQ((1<<1)|1)
+      --- Nested map: Profile properties ---
+      [07]                          ← key: number 3 (name) — VLQ((3<<1)|1)
+      [0A 52 69 73 68 69]          ← value: string "Rishi" — VLQ(5<<1) + bytes
+      [00]                          ← end of Profile map
+    [03]                            ← key: number 1 (Event) — VLQ((1<<1)|1)
+    [03]                            ← value: number 1 (MAP_VALUE_TYPE)
+      --- Nested map: Event properties ---
+      [2D]                          ← key: number 22 (productId) — VLQ((22<<1)|1)
+      [0C 69 50 68 6F 6E 65]      ← value: string "iPhone" — VLQ(6<<1) + bytes
+      [00]                          ← end of Event map
+    [00]                            ← end of top-level map
+
+
+================================================================================
+  SHAPE D — With personalisations AND preview content
+================================================================================
+
+  Only for preview/test messages. Adds a third block after personalisations.
+
+  Example: same as Shape C but isPreviewMessage=true,
+           previewContent = "{\"title\":\"Hello\"}"
+
+  [00]                              ← protocolVersion = 0
+  [01]                              ← lastMessageId = 1
+  [01]                              ← messageCount = 1
+  --- Message 1 ---
+  [0C]                              ← meta block size
+    [01]                            ← id = 1
+    [65 E5 D8 00]                   ← sentTime
+    [A0 0B]                         ← ttlMinutes
+    [00 00 00 2A]                   ← targetingId = 42
+    [00]                            ← targetingVersion
+    [03]                            ← variant + 1 = 3
+    [80]                            ← status = 0x80 (isPreviewMessage = true)
+  [XX]                              ← personalisation block (same as Shape C)
+    ... personalisation map bytes ...
+  [XX]                              ← preview content block size
+    [01]                            ← previewContentVersion = 1
+    [24 7B 22 74 69 74 6C ...]     ← StringOrNumber: string "{\"title\":\"Hello\"}"
+
+
+================================================================================
+  MULTIPLE MESSAGES IN ONE USER_INBOX
+================================================================================
+
+  Example: 2 messages — msg1 (read, no pers) + msg2 (unread, with pers)
+
+  [00]                              ← protocolVersion = 0
+  [02]                              ← lastMessageId = 2
+  [02]                              ← messageCount = 2
+  --- Message 1 (Shape A) ---
+  [0C]                              ← meta block size
+    [01]                            ← id = 1
+    [65 E5 D8 00]                   ← sentTime
+    [A0 0B]                         ← ttlMinutes = 1440
+    [00 00 00 2A]                   ← targetingId = 42
+    [00]                            ← targetingVersion
+    [00]                            ← variant + 1 = 0 (default)
+    [01]                            ← status = 0x01 (isRead = true)
+  [00]                              ← empty personalisation block
+  --- Message 2 (Shape C) ---
+  [0C]                              ← meta block size
+    [02]                            ← id = 2
+    [65 E6 6B 80]                   ← sentTime = 1709600000
+    [80 1C]                         ← ttlMinutes = 3600 (2.5 days)
+    [00 00 00 63]                   ← targetingId = 99
+    [01]                            ← targetingVersion = 1
+    [02]                            ← variant + 1 = 2 (variant = 1)
+    [00]                            ← status = 0x00 (unread)
+  [XX]                              ← personalisation block with content
+    ... map bytes ...
+
+
+================================================================================
+  SIZE COMPARISON: APP INBOX vs UNIFIED INBOX
+================================================================================
+
+  For a simple message (no pers, no variant):
+
+  App Inbox:     [targetId:4B] [epoch:4B]                      = 8 bytes
+  Unified Inbox: [metaLen:1B] [id:1B] [sentTime:4B] [ttl:2B]
+                 [targetingId:4B] [ver:1B] [var:1B] [status:1B]
+                 [persLen:1B]                                  = 16 bytes + envelope
+
+  Unified Inbox messages are larger per-message due to:
+  - Length prefix for each block
+  - Additional fields (id, targetingVersion, status)
+  - VLQ overhead for small values
+
+  But the trade-offs are:
+  - Forward compatibility (skip unknown blocks)
+  - No Year 2038 problem (no sign-bit tricks)
+  - Status tracking (isRead, isDeliveredOnce)
+  - Unique message IDs
+  - User-level identity (not device-level)
+
+
+================================================================================
+  KEY DIFFERENCES FROM APP INBOX PROTOCOL
+================================================================================
+
+  Feature                    App Inbox              Unified Inbox
+  -------                    ---------              -------------
+  Envelope                   None                   Version + lastMessageId + count
+  Message ID                 None                   Auto-incremented per user
+  Integer encoding           Fixed 4-byte int32     VLQ (1-9 bytes)
+  Optional field flags       Sign bit tricks        Status byte bitmask
+  TTL storage                Not stored             VLQ(minutes since sentTime)
+  Block structure            None                   Length-prefixed
+  Status flags               None                   isRead, isDeliveredOnce
+  Personalisation keys       Numeric only (2B)      StringOrNumber (VLQ)
+  Personalisation values     Flat strings (max 255B) Nested maps (max 500 chars)
+  Max messages per user      ~50-100 (10KB cap)     300
+  Year 2038 safe             No                     Yes
+
+
+================================================================================
+  SOURCE FILES
+================================================================================
+
+  Serializer:     core/server-side-inbox/service/src/com/wizrocket/inbox/service/serialization/UserInboxBinarySerializer.java
+  Deserializer:   core/server-side-inbox/service/src/com/wizrocket/inbox/service/serialization/UserInboxBinaryDeserializer.java
+  Map serializer: core/server-side-inbox/service/src/com/wizrocket/inbox/service/serialization/MapBinarySerializer.java
+  Map deserializer: core/server-side-inbox/service/src/com/wizrocket/inbox/service/serialization/MapBinaryDeserializer.java
+  Extended I/O:   core/server-side-inbox/service/src/com/wizrocket/inbox/service/serialization/ExtendedDataOutputStream.java
+                  core/server-side-inbox/service/src/com/wizrocket/inbox/service/serialization/ExtendedDataInputStream.java
+  Redis codec:    core/server-side-inbox/service/src/com/wizrocket/inbox/service/redis/BinaryInboxCodec.java
+  Models:         core/server-side-inbox/models/src/com/wizrocket/inbox/models/InboxMessage.java
+                  core/server-side-inbox/models/src/com/wizrocket/inbox/models/UserInbox.java
+  Limits:         core/server-side-inbox/service/src/com/wizrocket/inbox/service/content/InboxLimits.java
