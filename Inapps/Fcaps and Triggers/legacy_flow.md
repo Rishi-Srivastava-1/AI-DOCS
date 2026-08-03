@@ -4,6 +4,8 @@ Scope: the **pre-6.0** in-app dispatch path — before the "in-app feature parit
 
 Everything below is verified against current `master` code paths and cross-checked with the BE TAN (`4008706201`) and SDK TAN (`4085613262`).
 
+> **Scope note — which "frequency caps" this is.** These docs cover the **in-app per-campaign fcaps**: the SDK-evaluated `frequencyLimits`/`occurrenceLimits` (advanced) and the legacy `tlc`/`tdc`/`mdc`/`efc`, checked via `InAppManager` / `TargetEvalManager` / the `core/inapps` quota checks. This is **not** the credit-based cross-channel **Advanced Frequency Limits (FcapV2)** system (`FcapV2CampaignConfig`; the `Advanced FCaps` NB work) — that's a separate NB/offline mechanism (now also used by Native Display). In-app dispatch never touches FcapV2; the two just share confusingly similar names.
+
 ---
 
 ## 1. When this flow is chosen
@@ -80,8 +82,10 @@ Account-level ceilings on the `accounts.n` document (`core/dao/.../AccountsDao.j
 
 | Constant | Mongo key | Getter |
 |---|---|---|
-| `INAPP_MAX_PER_SESSION` | `ism` | `Account.getInAppMaxPerSession()` (default `1`) |
+| `AccountsDao.INAPP_MAX_PER_SESSION` | `ism` | `Account.getInAppMaxPerSession()` (default `1`) |
 | `INAPP_MAX_PER_USER_PER_DAY` | `imp` | `Account.getInappMaxPerUserPerDay()` (default `10`) |
+
+> **Watch the session-ceiling key rename.** The account doc stores the per-session ceiling under `ism` (`AccountsDao.INAPP_MAX_PER_SESSION = "ism"`), but LC ships it to the SDK under **`imc`** — a *second, distinct* constant with the same Java name (`InAppManager.INAPP_MAX_PER_SESSION = "imc"`, `InAppManager.java:83`). So `fillMetadata` (§7.4) does `response.put(INAPP_MAX_PER_SESSION /* "imc" */, account.getInAppMaxPerSession() /* reads "ism" */)`. The per-day ceiling keeps the same key `imp` on both sides.
 
 Default values are declared at `Account.java:71` (`private int imp = 10, wmp = 10;`) and `Account.java:77` (`private int wsm = 1, ism = 1;`).
 
@@ -335,6 +339,16 @@ private static int getPerDayLimit(ProfileReach.Mode mode, Account account) {
 
 The doc comment is authoritative: sessions are never a server concern in legacy.
 
+### 5.4 How global and campaign caps combine (coordination)
+
+The server side reduces to `targetQuotaReached = targetDailyLimitReached || targetLifetimeLimitReached || globalDailyLimitReached` — a display clears the **server** only if it passes **every** server-side cap. Combined with the SDK's own checks (session + the pre-render re-check), the end-to-end rule is: *a display is allowed only if it clears every applicable cap — the tightest binds.* Worked outcomes (fcaps PRD):
+
+- **No overlap → caps compound (AND).** Global `3/day + 1/session` + campaign `once ever` → shown **once, ever**. Global `3/day + 1/session` + campaign `10 ever` → each day capped at 3/day & 1/session, and stops entirely after the 10th lifetime show.
+- **Overlap → the tighter limit wins.** Global `10/day, 2/session` + campaign `once per session` → **once per session** (the campaign cap binds).
+- **Exclusion.** `efc > 0` short-circuits the whole server check (`return false`, §5.2): legacy `efc` bypasses **target + global**; advanced `excludeGlobalFCaps` bypasses **global only**. ⚠️ Per the fcaps PRD an excluded in-app is *still counted* in the frequency counters (so it still consumes global budget for other campaigns) — but that is **SDK-side counter maintenance**, not visible in `targetQuotaReached`, which only reads the counts the SDK reports.
+
+(Session caps — target `mdc`, global `ism` — never participate server-side; they combine on the device, §5.3.)
+
 ---
 
 ## 6. Trigger + segmentation evaluation
@@ -368,6 +382,21 @@ Expressiveness (from the SDK TAN's "Triggers" section):
 - Optional geo-radius (Haversine on backend's fixed earth-diameter constant, `EDUtils.java:698-712`)
 
 The BE evaluates the full `sq`/`wc` query, meaning trigger event + property filters + past-behaviour (miniWho) + segmentation are all resolved server-side per event.
+
+### 6.1 `Charged` event — item vs detail properties
+
+`Charged` is the only event with **two** property namespaces, so it gets special matching:
+- **Detail properties** (top-level: `Amount`, `Currency`, …) — matched like any event property.
+- **`Items`** — an array of maps, one per cart line (`{product_name, price, category, …}`). In the stored `sq`/`wc` query, item-level predicates are tagged **`"i": true`** (`BasicEPHandler.ITEM_FLAG`, `core/dao/src/com/wizrocket/db/query/BasicEPHandler.java:241`).
+
+**Server-side evaluation — "any item matches":** a predicate flagged `i:true` routes to `BasicEPHandler.matchEventPropsItemsArray` (`.java:2426-2464`):
+```java
+Object itemObj = actual.get(CHARGED_ITEMS);            // the event's Items array (case-insensitive fallback)
+for (Object item : (List) itemObj)
+    if (matchBasicEventProperties(exPropName, q, (BasicDBObject) item)) return true;  // ANY line matches → true
+// CHAN-3295: if Items is null/empty, evaluate against a BLANK item so not-set/negative operators still behave
+```
+So an item predicate is satisfied when **any single line item** matches (OR-over-items); an empty/absent cart is evaluated against a blank item. This routine lives in the shared `BasicEPHandler` engine that `processOnlineTarget` calls, so **every mode** (legacy, CS, SS) evaluates `Charged` items this way server-side. The CS/SS metadata split (`eventProperties` vs `itemProperties`) is covered in `cs_mode.md` §3.4.
 
 ---
 
@@ -465,7 +494,18 @@ Per SDK TAN "Sample In-app notification payload" and "Global Caps":
 5. Send both counters in the *next* request as `tlc` (list of triples) and `imp` (int).
 6. On `wzrk_id` receipt, the id encodes `campaignId + "_" + YYYYMMDD` — the SDK uses the date part to know when to reset per-day counters.
 
-Server side: `inapp_stale` in the response tells the SDK which target IDs to purge from local counter storage — targets that have been stopped/completed. The SDK sends its full `tlc` array; the server returns a subset of stale IDs so the device can shrink its list.
+### 9.1 Dead targets (`inapp_stale`) — SDK counter garbage-collection
+
+The SDK persists a per-campaign counter **forever** (the `tlc = [targetId, todayCount, lifetime]` list). Stopped/completed/deleted campaigns would otherwise linger on-device indefinitely. `inapp_stale` is LC telling the SDK which of those IDs to forget. It is pure housekeeping — **no effect on delivery or cap enforcement**.
+
+Produced by `DeadTargetsEvalManager.attachDeadTargets` (`core/lc/src/java/com/wizrocket/lc/targeting/DeadTargetsEvalManager.java:26-97`):
+
+- **Input:** the SDK's shown-list (`tlc`) — every campaign id it still holds counters for.
+- **Diff:** against the account's currently-running targets from `ActiveTargetingIdsProvider` (`getCurrentInAppTargets` / web / inbox / native-display, an in-memory cache) — any id **not** in the live set is a candidate.
+- **1-hour creation guard** (`.java:84`): `if (now - targetId < 3600) continue;`. Target IDs **are the campaign's creation epoch-seconds**, so `now - targetId` is the campaign's age. Targets younger than an hour are never marked dead — the active-targets cache refreshes only periodically and may not yet contain a just-created campaign, so this guards against a false-positive purge.
+- **Per-channel keys** (`.java:19-21`): `inapp_stale` (InApp **and** Web), `inbox_stale` (WebInbox), `native_display_stale` (WebNativeDisplay).
+
+On receipt the SDK drops those IDs from its persistent impression map / counter list, stops carrying them in future `tlc` uploads, and reclaims storage. The same mechanism serves legacy, CS, and SS — see `cs_mode.md` §7.3 and `ss_mode.md` §6.5.
 
 ---
 

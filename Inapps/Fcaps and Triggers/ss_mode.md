@@ -6,6 +6,8 @@ Do not confuse this with the pre-6.0 dispatcher (see [`legacy_flow.md`](./legacy
 
 Everything below is verified against current `master` and cross-checked with the BE TAN (`4008706201`), SDK TAN (`4085613262`), and Key Decisions doc (`4052779089`).
 
+> **Scope note — which "frequency caps" this is.** These docs cover the **in-app per-campaign fcaps**: the SDK-evaluated `frequencyLimits`/`occurrenceLimits` (advanced) and the legacy `tlc`/`tdc`/`mdc`/`efc`, checked via the `core/inapps` quota checks / `TargetEvalManager`. This is **not** the credit-based cross-channel **Advanced Frequency Limits (FcapV2)** system (`FcapV2CampaignConfig`; the `Advanced FCaps` NB work) — a separate NB/offline mechanism (now also used by Native Display). In-app dispatch never touches FcapV2; the two just share confusingly similar names.
+
 ---
 
 ## 1. When SS mode is chosen
@@ -168,6 +170,16 @@ Adds `templateName` (custom-code template) and `inactionDuration` (if any) on to
 
 **Purpose:** pick what to render on session-start in one round-trip — either **one journey inapp** or **all qualifying campaign inapps** (never both).
 
+**Why App Launched needs a dedicated strategy (the "special case"):** every *other* SS event uses the metadata → `inapps_eval` → content round-trip (§3). App Launched can't:
+- It is **dual-purpose** — simultaneously a *display trigger* and the moment the SDK **fetches the in-app catalog** for the session.
+- On the **first launch after a campaign is created**, the SDK has no metadata for that campaign yet, so it *cannot* name it in `inapps_eval`. There is no prior round-trip to lean on.
+
+So for App-Launched-triggered in-apps the server ships **full content in advance** (not just metadata), and the labor splits differently from a normal event:
+- **Server (this strategy):** segmentation (`processTarget`) + control group + global-daily quota, and emits **full content** for the winner(s). **No `inapps_eval` gate** here — the server evaluates eligibility itself because there is no SDK vote to wait for (contrast `DeliveryStrategySS.shouldSkipTarget` §4.4, which *does* gate advanced campaigns on `inAppEvalIds`).
+- **SDK:** receives the content bundle and still evaluates `whenLimits`/`occurrenceLimits`/advanced caps **locally**, orders by priority, renders the first eligible one. (SDK TAN: *"Those notifications have full content. They need to be evaluated for whenLimits … the eligible campaigns are ordered by priority and the first one is sent for display."*)
+
+This is the mirror image of the normal flow (§4.4): there the SDK pre-filters and the server finalizes; here the server over-delivers all eligible content and the SDK does the final advanced-limit filtering + priority pick.
+
 **Target list** — `DeliveryTargetsAppLaunchedSS.java:24-44`:
 Union of App-Launched-triggered campaigns AND no-trigger campaigns, non-CS, non-`InstantEventClosure`, sorted by priority desc + id asc.
 
@@ -211,6 +223,8 @@ Key rules:
 - **Journey wins** → sent alone under `inapp_notifs` (SDK renders as the sole App Launched inapp).
 - **Campaign wins** → **all** eligible campaigns (not just one) go out under `inapp_notifs_applaunched`. Journeys after that point are ignored.
 - **Suppressed campaign** still locks in the campaign path — subsequent journeys blocked. Stubbed suppressed payload is emitted via `PayloadProviderSuppressedCS` so SDK reports the CG event.
+
+**What else ships on the same App Launched response:** `AppLaunchedSS` never runs alone. `getSS` composes it with `DeliveryStrategyMetaSS` (metadata for **all** advanced-rule SS campaigns) and `DeliveryStrategyAppLaunchedSSMeta` (inaction bootstrap). So one App Launched response can carry `inapp_notifs_applaunched`/`inapp_notifs` (render-now) **plus** `inapp_notifs_ss` (session metadata) **plus** `inapp_notifs_applaunched_meta` (inaction) — see the §2 composition matrix. Note the deliberate asymmetry: the **render-now** App-Launched targets are segmented up-front *here*, but the **metadata-for-later** set from `MetaSS` is shipped **regardless of segment**, because a user can qualify mid-session (Key Decisions: *"we won't run qualification at App Launched because a user can qualify afterwards … return metadata for all in-apps regardless"*).
 
 **Quota check integration** — `combinedQuotaCheck.targetQuotaReached(params, ti)` (`.java:157`). For campaigns under `ADVANCED_FCAPS` this checks only global daily; for journeys it uses legacy per-target caps.
 
@@ -410,11 +424,26 @@ Bound at `InAppsCommonModule.java:117-125` — it's an instance of `DeliveryStra
 
 Since journeys are SS, App-Launched suppression tracking must be supported even in "pure SS" accounts.
 
+**Role of `inapps_suppressed` — why the SDK must ack.** A control-group (CG) user must **not** see the in-app, but must still be **counted** (the CG is the held-back arm of the A/B measurement). For content the SDK decides to display — i.e. the App-Launched pass, where full content is shipped in advance (§4.2) — the server knows CG membership at delivery time but **not when (or whether) the SDK would actually have shown** the in-app. So it can't time the suppression event itself. The flow, mirroring CS (`cs_mode.md` §9):
+
+1. **Server → SDK:** a CG-suppressed App-Launched in-app is shipped with `"suppressed": true` + `"wzrk_cgId"` (via `PayloadProviderSuppressedCS`) instead of being dropped — the SDK still gets its metadata so it can run trigger/priority logic.
+2. **SDK → server:** when the SDK's logic selects that in-app for what would have been display, instead of rendering it reports `{wzrk_id, wzrk_pivot, wzrk_cgId}` in the **next** request's `inapps_suppressed` meta.
+3. **Server → CG event:** parsed (`MobileAppRequestContainer.java:111,1578` → `InAppProcessorAdapter.java:189` → `ProcessParams.inAppSuppressIds`), this strategy turns each into a `SuppressEvent`, and `InAppProcessorAdapter.convertSuppressEvents` (`.java:238-273`) emits a `NotificationSuppressed`-style CG event through LC → LP → ES (deduped by `NOTIFICATION_CLICKED_ID`).
+
+**App-Launched batching quirk:** an App-Launched suppression **cannot** be reported inside the App Launched request itself — at that point the in-app hasn't been shown/suppressed yet. It's reported on the **next** event, which is why `DeliveryTargetsSuppressionsCS` includes App-Launched-triggered targets in its scope.
+
+**Contrast — pure SS per-event needs no ack:** on a regular event the server returns content only for `inapps_eval` IDs, so for a CG user it simply withholds content and records the suppression itself at qualification time. `inapps_suppressed` exists specifically for the **client-decided-display** cases (CS, and App Launched under SS). This is the render-side counterpart to `inapps_eval` (§5): `inapps_eval` = "send me content for these"; `inapps_suppressed` = "I withheld these for CG — log it now."
+
 ---
 
 ## 5. The `inapps_eval` protocol — SDK-driven server dispatch
 
-Central to how advanced-rules SS campaigns get their content.
+**Role in one line:** `inapps_eval` is the SDK→server **vote** — an array of campaign IDs (`ti`) the SDK evaluated **locally** (triggers + advanced fcaps + occurrence limits) and deemed eligible on this event. It is the request-side counterpart to the `inapp_notifs_ss` metadata the server pushed earlier, and it's what unlocks **content** for advanced-rule campaigns.
+
+**The round-trip it closes:**
+1. Server pushes metadata (`whenTriggers` + `frequencyLimits` + `occurrenceLimits`) for advanced campaigns → `inapp_notifs_ss` (via `MetaSS` / `AppLaunchedSSMeta`).
+2. On each user event the SDK evaluates those rules against its local impression map and puts the winning IDs in `inapps_eval`.
+3. Server returns content for the voted-for IDs — after its own checks — → `inapp_notifs`.
 
 ### 5.1 The contract
 
@@ -423,41 +452,42 @@ Per the BE TAN:
 
 Request meta (from SDK on a regular event):
 ```json
-[
-  {
-    "g": "__d5e0cae60ea14978b908d717c8aa82bf",
-    "type": "meta",
-    "inapps_eval": [55001, 55002]
-  }
-]
+[ { "g": "__d5e0cae60ea14978b908d717c8aa82bf", "type": "meta", "inapps_eval": [55001, 55002] } ]
 ```
+The SDK may repeat an ID (e.g. the same campaign matched by two batched events); the server parses into a **`Set<Integer>`**, so duplicates collapse.
 
 ### 5.2 The server side
 
-`inapps_eval` is unpacked into `ProcessParams.inAppEvalIds` at `InAppProcessorAdapter.java:180`:
-```java
-.inAppEvalIds(mobileContainer.getEvalInApps())
-```
+Parsed from the request into `ProcessParams.inAppEvalIds`:
+- `MobileAppRequestContainer.java:110,1575-1576` — reads `"inapps_eval"` into `evalInApps` (a `Set<Integer>`, `.java:174`).
+- `InAppProcessorAdapter.java:180` — `.inAppEvalIds(mobileContainer.getEvalInApps())`.
 
-In `DeliveryStrategySS.shouldSkipTarget` (`.java:106-114`):
-```java
-boolean skipCampaign = !ti.isJourneyTarget()
-        && !params.getInAppEvalIds().contains(ti.getID())
-        && ti.getAdvancedLimits().map(AdvancedLimits::hasAdvancedRules).orElse(false);
-```
+**Two** strategies gate on it, both with the same `!inAppEvalIds.contains(id) && hasAdvancedRules` shape:
+- **`DeliveryStrategySS.shouldSkipTarget`** (`.java:106-114`) — content delivery:
+  ```java
+  boolean skipCampaign = !ti.isJourneyTarget()
+          && !params.getInAppEvalIds().contains(ti.getID())
+          && ti.getAdvancedLimits().map(AdvancedLimits::hasAdvancedRules).orElse(false);
+  ```
+- **`DeliveryStrategySSInaction`** (`.java:132`, `isDisqualifiedBySDK`) — inaction qualification. Its inline comment (`.java:118`) notes it won't re-emit a payload for `inapps_eval` targets because the SDK already holds their meta.
 
-Meaning:
-- Journey targets are always in play.
-- Simple campaigns (no advanced rules) are always in play.
-- **Advanced-rule campaigns are gated on `inAppEvalIds`** — server refuses to fire them unless the SDK explicitly asserts they've passed local rules.
+Three tiers fall out of that predicate:
+- **Journey targets** — always in play (never gated on `inapps_eval`).
+- **Simple campaigns** (no advanced rules) — always in play; the server holds authoritative fcap state via legacy `tlc`/`tdc` + SDK-supplied `TARGET_SHOWN_LIST`.
+- **Advanced-rule campaigns** — gated: the server **refuses to fire them unless their ID is in `inapps_eval`**.
 
-### 5.3 The double-fire guard
+Survivors then pass the server's *own* gates — segmentation (`processTarget`), control group, and global-daily quota (§6) — before content ships in `inapp_notifs`.
 
-This is the whole reason the guard exists: metadata for advanced-rule campaigns has already been shipped via `MetaSS` / `AppLaunchedSSMeta`. The SDK is expected to enforce `frequencyLimits`/`occurrenceLimits` locally. If the SDK says "eligible" (via `inapps_eval`), the server takes its word.
+### 5.3 The double-fire guard & trust boundary
 
-If a buggy SDK asserts `inAppEvalIds` when it shouldn't, the server has no way to detect that — this is a documented trust assumption.
+The gate exists because advanced campaigns' metadata was already shipped (`MetaSS` / `AppLaunchedSSMeta`) and the SDK owns `frequencyLimits`/`occurrenceLimits` evaluation. Without it the server would re-fire those campaigns on every matching event, ignoring the on-device caps. So: **if the SDK votes (via `inapps_eval`), the server trusts it; if it doesn't, the server stays silent.**
 
-Simple (non-advanced) campaigns don't need this because the server holds authoritative fcap state for them (via legacy `tlc`/`tdc` + SDK-supplied `TARGET_SHOWN_LIST`).
+The server cannot verify the SDK's local evaluation — a buggy SDK that over- or under-reports is undetectable server-side. Documented trust assumption. Simple campaigns don't need this route because the server holds their authoritative fcap state directly.
+
+### 5.4 Scope
+
+- **SS mode only.** In CS the content is already cached on-device, so the SDK displays directly — no content round-trip, no `inapps_eval` (CS uses `inapp_suppressed` for CG tracking instead).
+- **App Launched is exempt even in SS.** There's no prior round-trip on session start, so the server ships content in advance via `inapp_notifs_applaunched` **without** an `inapps_eval` gate (§4.2).
 
 ---
 
@@ -498,6 +528,8 @@ return Optional.ofNullable(accountProvider.apply(params.getAccountId()))
 
 Per-target daily/lifetime is **not** checked here — SDK owns it. Server only guards the global daily cap (with per-campaign opt-out via `AdvancedLimits.excludeGlobalFCaps`).
 
+**Coordination — how the SDK's per-campaign caps combine with the server's global cap.** In advanced SS the split is: the **SDK** enforces every per-campaign rule (session/day/week/ever + occurrence, AND-combined) *and* the global session cap, only emitting `inapps_eval` for campaigns that already passed; the **server** then applies the global **daily** cap on top. A campaign shows only if it clears **both** — the tighter binds. `excludeGlobalFCaps` opts a campaign out of the server's global-daily check only. Full combination rules + worked examples: `legacy_flow.md` §5.4.
+
 ### 6.3 Legacy quota check — per-target + global
 
 `TargetEvalManager.targetQuotaReached` at `.java:297-345` — the same routine used by the legacy dispatcher. Checks `efc`, per-target `tdc`/`tlc` (against SDK-supplied `TARGET_SHOWN_LIST`), then global daily (against SDK-supplied `imp`). See [`legacy_flow.md`](./legacy_flow.md) §5 for the full walkthrough.
@@ -522,6 +554,8 @@ The pattern is uniform: **quota check fires only when actual content is about to
 Same as legacy — the SDK ships `TARGET_SHOWN_LIST` (`tlc`) and `imp` in every request. Read at `MobileAppRequestContainer.java:670-675`, threaded through `ProcessParams.inappTargetUserCounts` + `shownToday`. See `legacy_flow.md` §3 for the details.
 
 Under advanced-fcap SS, the SDK's `{occurrenceId, timestamp}` map (last 100 impressions) tracks per-campaign counts locally. The `TARGET_SHOWN_LIST` is still sent for the simple-fcap fallback and for `inapp_stale` housekeeping.
+
+**Dead targets (`inapp_stale`).** LC returns the subset of the SDK's tracked campaign IDs that are no longer live so the device can shrink its counter store — produced by `DeadTargetsEvalManager.attachDeadTargets` (`DeadTargetsEvalManager.java:26-97`): diff the SDK's `tlc` ids against the account's running targets (`ActiveTargetingIdsProvider`), return those absent from the live set, skipping targets younger than 1 hour (`now - targetId < 3600`, since target IDs are creation epoch-seconds). Per-channel keys `inapp_stale` / `inbox_stale` / `native_display_stale`. This is channel-agnostic housekeeping with no bearing on the quota checks above — full walkthrough in `legacy_flow.md` §9.1 ("Dead targets").
 
 ---
 
@@ -645,8 +679,8 @@ Response fields overall:
 
 | Key | Set by | Notes |
 |---|---|---|
-| `imc` | `InAppManager.fillMetadata` | Account session ceiling — SDK-enforced |
-| `imp` | `InAppManager.fillMetadata` (only if `!= -1`) | Account daily ceiling |
+| `imc` | `InAppManager.fillMetadata` | Account **session** ceiling — SDK-enforced. **Key rename:** value read from account-doc field `ism` (`AccountsDao.INAPP_MAX_PER_SESSION = "ism"`) but shipped to the SDK under key `imc` (`InAppManager.INAPP_MAX_PER_SESSION = "imc"`) — two *distinct* Java constants that share the name. Verified at `InAppManager.java:83,128`. |
+| `imp` | `InAppManager.fillMetadata` (only if `!= -1`) | Account **daily** ceiling (same key `imp` on both account doc and response) |
 | `inapp_delivery_mode` | `InAppProcessorAdapter.fillMetadata` | Value: `"SS"` |
 | `inapp_notifs_ss` | `MetaSS`, `SS` (via merge — but SS uses `INAPP_NOTIFS`, not `_SS`) | Metadata bundle |
 | `inapp_notifs_applaunched` | `AppLaunchedSS` (campaign path) | Full campaign content |
@@ -723,6 +757,8 @@ Inputs consumed:
 - `firstSession`, `device`
 
 **Profile is loaded from ES** only when the target's `LOAD_PROFILE` flag is on (via `TriggerQueryDto.needsProfile`). That gate is driven by segmentation-query needs, not by fcap needs.
+
+**`Charged` event — item vs detail properties.** Like every mode, SS evaluates `Charged` specially: item-level predicates (tagged `"i":true`) are matched with **any-item-matches** semantics via `BasicEPHandler.matchEventPropsItemsArray`, and when LC ships `whenTriggers` metadata it splits them into a separate `itemProperties` list (only for `Charged`) for the SDK to evaluate the same way. Full walkthrough: `legacy_flow.md` §6.1 (server-side any-match + blank-item guard) and `cs_mode.md` §3.4 (the `eventProperties` vs `itemProperties` split shipped to the SDK).
 
 ---
 
@@ -818,6 +854,6 @@ Fields relevant across the SS composition:
 7. **Metadata-only strategies bypass the quota check.** The SDK re-checks caps at render time using the ceilings shipped in the response.
 8. **Inaction correctness depends on FStore.** `AppLaunchedSSMeta` uses batch writes; `SSInaction` uses per-target writes; `SSInactionContentFetch` cleans up. Any write failure drops the payload rather than risk over-delivery.
 9. **Content-fetch replays the qualifying event context.** `SSInactionContentFetch` rebuilds `ProcessParams` with the stored original event, so personalization resolves against the right event, not the fetch event.
-10. **App Launched is special.** It gets three simultaneous strategies (`MetaSS` + `AppLaunchedSS` + `AppLaunchedSSMeta`) to minimize round-trips for the session's opening pass.
+10. **App Launched is special.** It's the one event that ships **content in advance** instead of via the `inapps_eval` round-trip — because it doubles as the catalog fetch and the first-launch case has no prior metadata for the SDK to name in `inapps_eval`. It gets three simultaneous strategies (`MetaSS` + `AppLaunchedSS` + `AppLaunchedSSMeta`): render-now targets are segmented up-front, metadata-for-later is shipped regardless of segment. The server delivers all eligible content; the SDK still does advanced-limit filtering + priority pick before render. Campaign-wins → **all** campaigns under `inapp_notifs_applaunched`; journey-wins → **one** journey under `inapp_notifs` (never both).
 11. **Response mixes many keys.** `inapp_notifs_ss` (metadata), `inapp_notifs_applaunched` (App Launched content), `inapp_notifs_applaunched_meta` (App Launched inaction meta), `inapp_notifs_meta` (per-event inaction meta), and `inapp_notifs` (content to render, either journey or SS event). Plus `inapp_delivery_mode: "SS"`, `imc`, `imp`.
 12. **The BE TAN's May 2024 optimisation** — "not send meta for campaigns that don't use these advanced features" — is exactly the `skipCampaign` guard in `DeliveryStrategySS.shouldSkipTarget`. Simple campaigns don't need metadata; they go through server-side per-event dispatch like journeys.

@@ -4,6 +4,8 @@ Scope: how in-apps flow **when the account is in CS (client-side) mode** — the
 
 Everything below is verified against `master` code and cross-checked with the BE TAN (`4008706201`), SDK TAN (`4085613262`), and Key Decisions doc (`4052779089`).
 
+> **Scope note — which "frequency caps" this is.** These docs cover the **in-app per-campaign fcaps**: the SDK-evaluated `frequencyLimits`/`occurrenceLimits` (advanced) and the legacy `tlc`/`tdc`/`mdc`/`efc`. This is **not** the credit-based cross-channel **Advanced Frequency Limits (FcapV2)** system (`FcapV2CampaignConfig`; the `Advanced FCaps` NB work) — a separate NB/offline mechanism (now also used by Native Display). In-app dispatch never touches FcapV2; the two just share confusingly similar names.
+
 ---
 
 ## 1. When CS mode is chosen
@@ -244,6 +246,15 @@ Server did segmentation for each event of the campaign's trigger list; here the 
 
 Note: even legacy-legacy CS accounts (i.e., `ADVANCED_FCAPS` off but `CLIENT_SIDE` on) get this filtering.
 
+**`Charged` — item vs detail properties in the SDK bundle.** `Charged` is the only event with two property namespaces: top-level **details** (`Amount`, `Currency`, …) and an **`Items`** array (one map per cart line). When LC compiles `whenTriggers`, it **splits predicates by the `"i":true` flag** into `eventProperties` (details) and a separate `itemProperties` list — the latter attached **only for `Charged`** (`MongoToSdkTriggersConverter.java:125-153`):
+```java
+if (property.getBoolean(Keys.ITEM, false)) itemProperties.add(...);   // "i": true → item-level
+else                                        eventProperties.add(...);
+if (eventName.equals(CHARGED) && !itemProperties.isEmpty())
+    formattedRule.put(ITEM_PROPERTIES, itemProperties);
+```
+The SDK then reshapes the event's `Items` array into columnar form (`product_name: ["m1","m2","m3"]`, `price: [99.9, 49.9, 23.9]`) and matches an `itemProperty` if **any** value in that column satisfies the operator (array-vs-array → any×any) — deliberately mirroring the server's `matchEventPropsItemsArray` any-item semantics so CS local eval and server eval agree. Server-side detail (any-match + blank-item `CHAN-3295` guard): `legacy_flow.md` §6.1.
+
 ### 3.5 Control group suppression
 
 Before returning the payload, `DeliveryStrategyCS.getPayload` (`.java:67-101`) asks `ControlGroupSuppressor.shouldSuppress(...)`:
@@ -411,7 +422,7 @@ Each response includes:
 - `imc` — session ceiling (SDK-enforced only)
 - `imp` — daily ceiling (SDK-enforced only, in CS mode for campaigns)
 - `inapp_delivery_mode: "CS"` — added by `InAppProcessorAdapter.fillMetadata` (`.java:80-84`)
-- Optionally `inapp_stale` — target ids whose campaigns are stopped/completed. The SDK uses this to purge them from its local impression map and counter list.
+- Optionally `inapp_stale` — target ids whose campaigns are no longer live (stopped/completed/deleted). The SDK uses this to purge them from its local impression map and counter list. Produced by `DeadTargetsEvalManager.attachDeadTargets` (`DeadTargetsEvalManager.java:26-97`): it diffs the SDK's reported `tlc` ids against the account's currently-running targets (`ActiveTargetingIdsProvider`) and returns the ones not in the live set, skipping any target younger than 1 hour (`now - targetId < 3600` — target IDs are creation epoch-seconds) to avoid false-purging just-created campaigns. Per-channel keys: `inapp_stale` (InApp/Web), `inbox_stale`, `native_display_stale`. Full mechanism in `legacy_flow.md` §9.1 ("Dead targets").
 
 ---
 
@@ -538,7 +549,7 @@ Per Key Decisions ("Backwards compatibility & rollout"):
 6. **Legacy `mdc` in the `w` block.** When `ADVANCED_FCAPS` is on, `ContentUtil.removeLegacyMdcLimit` (`.java:227-234`) strips `MAX_PER_CAMPAIGN` from the dimensional-info block to avoid old SDK code paths honoring it twice.
 7. **Journeys can suppress-lock a slot even in CS.** The composed strategy always adds `deliveryStrategyJourney`, and `DeliveryStrategySS` there enforces the legacy quota check (§4). A caps-blocked journey doesn't leak into `inapp_notifs`, but a CG-suppressed one still generates a supplementary event.
 8. **`InAppProcessorAdapter.fillCustomProfileFieldsToFetch`** (`.java:104-140`) pre-fetches profile fields needed by any CS in-app, but **only** on meta-delivery events — so bulk profile lookup happens once per session (App Launched), not on every event.
-9. **CG suppression payload still counts as a `targetsQualifiedSet` add.** Once a suppressed target is emitted, other SS strategies in the same request won't double-emit it (§5 in the SS doc has more).
+9. **CG suppression payload still counts as a `targetsQualifiedSet` add.** Once a suppressed target is emitted, other SS strategies in the same request won't double-emit it (`ss_mode.md` §11, `targetsQualifiedSet`, has more).
 10. **First-time trigger under CS.** BE TAN Nov 2024 note: SDKs get an "exactly once" rule injected into `frequencyLimits` for first-time-only campaigns, since first-time state can't be verified across devices. The BE injection happens inside `ContentUtil.getFCaps` (`.java:206-216`).
 
 ---
