@@ -1,0 +1,132 @@
+[
+    {
+        "af":
+        {
+            "Build": "23820000",
+            "Carrier": "T-Mobile",
+            "LIAMC": 0,
+            "Make": "Google",
+            "Model": "sdk_gphone16k_arm64",
+            "OS": "Android",
+            "OS Version": "17",
+            "SDK Version": 80200,
+            "Version": "8.2.0.0-inboxv2-debug",
+            "abckt": "active",
+            "cc": "us",
+            "dpi": 480,
+            "dt": 1,
+            "fcmsid": true,
+            "hgt": 5.63,
+            "locale": "en_US",
+            "useIP": false,
+            "wdt": 2.42
+        },
+        "ait": 0,
+        "arp":
+        {
+            "av": "8.2.0.0-inboxv2-debug",
+            "d_ts": 1784711090,
+            "dh": -1941212472,
+            "hgt": 5,
+            "i_n": "ZmtlcgUC",
+            "id": "468-RZW-ZK6Z",
+            "j_n": "ZmtgcgMC",
+            "j_s": "{}",
+            "k_n": "DHggIkFYWAZnaGJyZxoxPxxTXll1Bw==",
+            "r_ts": 1784711984,
+            "rc_n": 5,
+            "rc_w": 60,
+            "v": 2,
+            "wdt": 2
+        },
+        "ct_pi": "Email,Identity",
+        "ddnd": false,
+        "debug": true,
+        "f_ts": 1784556886,
+        "fl": true,
+        "frs": false,
+        "g": "__35aeb7379cbc4b2e885e609dacede30f",
+        "id": "468-RZW-ZK6Z",
+        "imp": 2,
+        "l_ts": 1784711978,
+        "rct": 0,
+        "rtl":
+        [],
+        "tk": "012-b64",
+        "tlc":
+        [
+            [
+                "1784711607",
+                1,
+                1
+            ],
+            [
+                "1784711686",
+                1,
+                1
+            ]
+        ],
+        "type": "meta"
+    },
+    {
+        "dsync": true,
+        "ep": 1784717316,
+        "evtData":
+        {
+            "Build": "23820000",
+            "Carrier": "T-Mobile",
+            "LIAMC": 0,
+            "Make": "Google",
+            "Model": "sdk_gphone16k_arm64",
+            "OS": "Android",
+            "OS Version": "17",
+            "SDK Version": 80200,
+            "Version": "8.2.0.0-inboxv2-debug",
+            "abckt": "active",
+            "cc": "us",
+            "dpi": 480,
+            "dt": 1,
+            "fcmsid": true,
+            "hgt": 5.63,
+            "locale": "en_US",
+            "useIP": false,
+            "wdt": 2.42
+        },
+        "evtName": "App Launched",
+        "f": false,
+        "lsl": 6217,
+        "pai": "com.clevertap.beardedrobot",
+        "pg": 1,
+        "s": 1784717316,
+        "type": "event"
+    },
+    {
+        "dsync": false,
+        "ep": 1784717316,
+        "evtData":
+        {
+            "t": 1
+        },
+        "evtName": "wzrk_fetch",
+        "f": false,
+        "lsl": 6217,
+        "pg": 1,
+        "s": 1784717316,
+        "type": "event"
+    },
+    {
+        "data":
+        {
+            "action": "register",
+            "id": "dshs18BtT5GxiZMe3EdJYF:APA91bFBjMK6DabiEzJZNBWQ9FyphMdg9mQKInrRetjIXg8svrXXl4PCgouES-1trO9L1SKOgonrzix9-nizKxEI91yJoyekOfl-2-gU5pdvAHO3Po4Rumg",
+            "type": "fcm"
+        },
+        "dsync": false,
+        "ep": 1784717316,
+        "f": false,
+        "lsl": 6217,
+        "pg": 1,
+        "s": 1784717316,
+        "type": "data"
+    }
+]

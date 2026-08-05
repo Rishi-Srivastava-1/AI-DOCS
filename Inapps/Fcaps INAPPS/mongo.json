@@ -1,0 +1,307 @@
+[
+    {
+        "_id": 1784571579,
+        "bestTimeV2Enabled": true,
+        "c-by": "rishi.srivastava@clevertap.com",
+        "cfc_setting":
+        {
+            "always": false,
+            "exclude_global": false
+        },
+        "cg":
+        {},
+        "clonedFromTarget": -1,
+        "content":
+        {
+            "1":
+            {
+                "msg":
+                {
+                    "wzrk_default":
+                    {
+                        "bg": "#ffffff",
+                        "buttons":
+                        [],
+                        "close": true,
+                        "hasLandscape": false,
+                        "hasPortrait": true,
+                        "isMediaSourceRecommended": false,
+                        "isMediaSourceRecommendedLandscape": false,
+                        "is_native": true,
+                        "media":
+                        {},
+                        "mediaLandscape":
+                        {},
+                        "message":
+                        {
+                            "color": "#434761",
+                            "og": "",
+                            "replacements": "msg",
+                            "text": "msg"
+                        },
+                        "recommendedText":
+                        {
+                            "og": "",
+                            "replacements": "",
+                            "text": ""
+                        },
+                        "recommendedTextLandscape":
+                        {
+                            "og": "",
+                            "replacements": "",
+                            "text": ""
+                        },
+                        "rfp": false,
+                        "rounded-borders": false,
+                        "tablet": false,
+                        "title":
+                        {
+                            "color": "#434761",
+                            "og": "",
+                            "replacements": "title msg",
+                            "text": "title msg"
+                        },
+                        "type": "cover"
+                    }
+                }
+            },
+            "2":
+            {
+                "msg":
+                {
+                    "wzrk_default":
+                    {
+                        "bg": "#ffffff",
+                        "buttons":
+                        [],
+                        "close": true,
+                        "hasLandscape": false,
+                        "hasPortrait": true,
+                        "isMediaSourceRecommended": false,
+                        "isMediaSourceRecommendedLandscape": false,
+                        "is_native": true,
+                        "media":
+                        {},
+                        "mediaLandscape":
+                        {},
+                        "message":
+                        {
+                            "color": "#434761",
+                            "og": "",
+                            "replacements": "msg",
+                            "text": "msg"
+                        },
+                        "recommendedText":
+                        {
+                            "og": "",
+                            "replacements": "",
+                            "text": ""
+                        },
+                        "recommendedTextLandscape":
+                        {
+                            "og": "",
+                            "replacements": "",
+                            "text": ""
+                        },
+                        "rfp": false,
+                        "rounded-borders": false,
+                        "tablet": false,
+                        "title":
+                        {
+                            "color": "#434761",
+                            "og": "",
+                            "replacements": "title msg",
+                            "text": "title msg"
+                        },
+                        "type": "cover"
+                    }
+                }
+            }
+        },
+        "convGoal": null,
+        "device":
+        [
+            1,
+            2
+        ],
+        "e": "Topi",
+        "editHelperStatus": 0,
+        "efc": -1,
+        "endTime": 2147483647,
+        "excludeGlobalFCaps": true,
+        "feature": 0,
+        "frequencyLimits":
+        [
+            {
+                "frequency": 1,
+                "limit": 10,
+                "type": "hours"
+            },
+            {
+                "limit": 2,
+                "type": "session"
+            }
+        ],
+        "inappttl":
+        {
+            "e": 1784744379,
+            "s": 172800
+        },
+        "isClientSide": false,
+        "isEDMFramework": true,
+        "mdc": "1",
+        "name": "My New In-App Message Campaign",
+        "newCampaignUI": true,
+        "occurrenceLimits":
+        [
+            {
+                "limit": 2,
+                "type": "onEvery"
+            }
+        ],
+        "prefixExclMap":
+        {},
+        "priority": 10,
+        "provisionalID": "0c413cfa-c3a7-475b-8bad-0d76852b2b3f_1784571579217",
+        "q":
+        {
+            "1":
+            {
+                "sq":
+                [
+                    {
+                        "ed":
+                        {},
+                        "k": 2,
+                        "n": "Topi",
+                        "o": 12,
+                        "v":
+                        []
+                    }
+                ]
+            },
+            "2":
+            {
+                "sq":
+                [
+                    {
+                        "ed":
+                        {},
+                        "k": 2,
+                        "n": "Topi",
+                        "o": 12,
+                        "v":
+                        []
+                    }
+                ]
+            }
+        },
+        "qm":
+        {
+            "campaignType": "single",
+            "deviceTypes":
+            [
+                1,
+                2,
+                3
+            ],
+            "editorConfigured": true,
+            "eventEntry":
+            {
+                "c":
+                {},
+                "e":
+                [],
+                "ed":
+                {},
+                "ev": 150,
+                "i":
+                [],
+                "qm_dt":
+                {},
+                "s":
+                [],
+                "tags":
+                {}
+            },
+            "is_native": true,
+            "mdc": "1",
+            "msg":
+            {
+                "bg": "#ffffff",
+                "buttons":
+                [],
+                "close": true,
+                "hasLandscape": false,
+                "hasPortrait": true,
+                "isMediaSourceRecommended": false,
+                "isMediaSourceRecommendedLandscape": false,
+                "media":
+                {},
+                "mediaLandscape":
+                {},
+                "message":
+                {
+                    "color": "#434761",
+                    "og": "",
+                    "replacements": "msg",
+                    "text": "msg"
+                },
+                "recommendedText":
+                {
+                    "og": "",
+                    "replacements": "",
+                    "text": ""
+                },
+                "recommendedTextLandscape":
+                {
+                    "og": "",
+                    "replacements": "",
+                    "text": ""
+                },
+                "rfp": false,
+                "rounded-borders": false,
+                "tablet": false,
+                "title":
+                {
+                    "color": "#434761",
+                    "og": "",
+                    "replacements": "title msg",
+                    "text": "title msg"
+                },
+                "type": "cover"
+            },
+            "neverEnd": true,
+            "platforms":
+            [
+                1,
+                2
+            ],
+            "recommendationList":
+            [],
+            "segmentId": "adhoc",
+            "segmentName": "New Segment",
+            "segmentType": "action",
+            "sendInUserTz": false,
+            "senderTz": null,
+            "userTzWrapAround": true,
+            "whoQuery":
+            {}
+        },
+        "recommendationFilters":
+        {},
+        "runningCampaignVersion": 1,
+        "segment_definition": "Trigger when User does Topi",
+        "startTime": 1784571579,
+        "status": 0,
+        "statusChangedTS": 1784571579,
+        "tagIdList":
+        [],
+        "target_type": 0,
+        "tdc": -1,
+        "tlc": -1,
+        "type": 3,
+        "u-by": "rishi.srivastava@clevertap.com",
+        "version": 1
+    }
+]

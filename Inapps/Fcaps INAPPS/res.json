@@ -1,0 +1,153 @@
+{
+    "arp":
+    {
+        "av": "8.2.0.0-inboxv2-debug",
+        "d_ts": 1784711090,
+        "dh": -1941212472,
+        "hgt": 5.63,
+        "i_n": "ZmtlcgUC",
+        "id": "468-RZW-ZK6Z",
+        "j_n": "ZmtgcgMC",
+        "j_s": "{}",
+        "k_n": "DHggIkFYWAZnaGJyZxoxPxxTXll1Bw==",
+        "r_ts": 1784717323,
+        "rc_n": 5,
+        "rc_w": 60,
+        "v": 2,
+        "wdt": 2.42
+    },
+    "ff_notifs":
+    {
+        "kv":
+        [],
+        "ts": 1784717323
+    },
+    "imc": 200,
+    "imp": 200,
+    "inapp_delivery_mode": "SS",
+    "inapp_notifs_ss":
+    [
+        {
+            "excludeGlobalFCaps": -1,
+            "frequencyLimits":
+            [
+                {
+                    "frequency": 1,
+                    "limit": 5,
+                    "type": "days"
+                },
+                {
+                    "frequency": 1,
+                    "limit": 3,
+                    "type": "hours"
+                }
+            ],
+            "occurrenceLimits":
+            [],
+            "priority": 10,
+            "ti": 1784717105,
+            "whenTriggers":
+            [
+                {
+                    "eventName": "cpdf"
+                }
+            ],
+            "wzrk_id": "1784717105_20260722",
+            "wzrk_pivot": "wzrk_default"
+        },
+        {
+            "excludeGlobalFCaps": -1,
+            "frequencyLimits":
+            [
+                {
+                    "frequency": 1,
+                    "limit": 2,
+                    "type": "days"
+                },
+                {
+                    "frequency": 1,
+                    "limit": 1,
+                    "type": "hours"
+                }
+            ],
+            "occurrenceLimits":
+            [
+                {
+                    "limit": 2,
+                    "type": "onEvery"
+                }
+            ],
+            "priority": 10,
+            "ti": 1784717197,
+            "whenTriggers":
+            [
+                {
+                    "eventName": "cpdf2"
+                }
+            ],
+            "wzrk_id": "1784717197_20260722",
+            "wzrk_pivot": "wzrk_default"
+        }
+    ],
+    "inapp_stale":
+    [
+        1784711607,
+        1784711686
+    ],
+    "pushamp_notifs":
+    {
+        "ack": true,
+        "list":
+        [],
+        "pf": 240
+    },
+    "vars":
+    {
+        " varAPITest1": "cvbbdef value",
+        "Copy of prevTest1": "All edit",
+        "Folder1.var": "all_users_N",
+        "Folder2.Var2": "var2",
+        "JSON TEST": "{\"abc\": \"test\"}",
+        "July301": "julA",
+        "Soumya Test 2": 1000,
+        "Var2": "normalA",
+        "arafsiu": "ondsdfg",
+        "arpan": "d",
+        "arpan1": "123",
+        "banner": "dc",
+        "boolVar1": true,
+        "cloned": "rbac-value-test-edited",
+        "copyCheck": false,
+        "cp1": "All",
+        "cp2": 9,
+        "ecVar001": "All-A",
+        "fileVar1": "https://d11gh1sd24upek.cloudfront.net/1631012864/assets/f0ab0a3c939146a08af890f04711e9cf.plain",
+        "gefVar1": "Android qq",
+        "jsonTest": "\"{\\\"key\\\":456}\"",
+        "july302": "july302B",
+        "key": "val",
+        "key2": "{\n  \"text\": \"value\"\n}",
+        "newNumVar1": 1,
+        "newV1": "new",
+        "newVar1": "TestAll",
+        "newVar2": "ALL",
+        "newvar1": "",
+        "numVar1": 1234,
+        "prevTest1": "All edited11",
+        "randomValue": "no_value_provided",
+        "rbacApprovalTest": "12changed again",
+        "rbacVar002": "BUG013-RETEST-APR01",
+        "rbacVar003": "STAGED_B_NEW_VALUE",
+        "rbacVar004": "All usersbb",
+        "rbacVar005": "ALL005-222",
+        "rbacVar006": "All",
+        "rbacVar1": "ALL-EDITED-TEST",
+        "seg11": "all user val",
+        "strVar1": "ww",
+        "stringVar2": "def_value_A_453537",
+        "test": "fcgvh2345",
+        "theme": "Dark",
+        "v1": "10",
+        "value": "key"
+    }
+}

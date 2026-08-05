@@ -1,0 +1,32 @@
+
+
+Highest-priority ND campaign has advanced fcaps/triggers but is not in adunit_eval. Does the BE:
+
+- (a) stop — return nothing (your "NO OP"), or
+- (b) continue down the priority order to the next eligible campaign, where eligible = in adunit_eval or has no advanced fcaps/triggers?
+
+Current ND prod continues past a non-qualifying campaign. In-app continues. And the SDK votes for all eligible campaigns, not just its top pick — so if the top one is capped on-device, the next-best is already in the list.
+
+
+Same as inapp 
+
+
+-------------------------------------------------------------------------------------------------
+-------------------------------------------------------------------------------------------------
+
+Issue 2 — multi-ND FF + global caps.
+
+Multi-ND returns every campaign at the top priority level. Global caps are now SDK-side, so the SDK applies "x per session / x per day" itself. The interaction: if 3 campaigns tie at top priority but only 2 of the global budget remain, someone has to trim to 2 — and the BE has already called markAsSent on all 3.
+
+Which raises the design question: does the SDK apply the global cap before it votes, or after it receives content?
+
+- (a) Before voting. The SDK caps its own adunit_eval list to the remaining global budget, so the BE never ships more than can be shown. Sent stays accurate. But the SDK is then choosing which campaigns get dropped without the BE's segmentation verdict — it may hold back a campaign the BE would have disqualified anyway, wasting budget on nothing.
+- (b) After receipt. The SDK votes for all eligible, the BE returns all same-priority winners, and the SDK drops the overflow at display. Matches in-app's division of labour, but the dropped units were counted as sent (and billed).
+
+There's a prior question that decides how much this matters: when multi-ND returns N units, are all N actually displayed? If the feature exists because one screen hosts several ad-unit placements simultaneously, then N delivered = N shown, and the global cap genuinely has to be evaluated against N as a group rather than per unit. If instead they queue and only one shows, (b) leaks budget on every multi-return.
+
+Which is it — are multi-returned ND units shown together in different placements, or queued?
+
+
+
+

@@ -1,0 +1,290 @@
+
+
+Inapps: 
+
+1. Global fcaps : 	
+	a. x msg per session
+	b. x msg per day
+2. Campaign : 
+	a. Priority
+	b. Delay
+	c. Set Frequency (Deliver this campaign on specific days, specific time)
+	d. Exclude from Global limit
+	e. Fcap (deliver upto)
+		1. x times ever
+		2. x times per session
+		3. x times in y (seconds / minutes / hour / day / week)
+		4. AND condtion too (club above conditions)
+	f. Display rules
+		1. EXACTLY / EVERY x time
+		2. NO CLUBBING
+3. Journeys (BASIC)
+	a. Priority
+	b. Set Frequency (Deliver this campaign on specific days, specific time)
+	c. How often ? (This is old functionality)
+		1. Exclude from campaign limit
+		2. Once per session
+		3. Once per day
+		4. Once per user for the duration of this campaign
+
+
+*********************************************************************************************************
+*********************************************************************************************************
+
+
+ND: 
+(As of now) 
+
+1. Campaign : 
+	a. Priority
+	b. Set Frequency (Deliver this campaign on specific days, specific time)
+2. Journeys : 
+	a. Priority
+	b. Set Frequency (Deliver this campaign on specific days, specific time)
+
+
+
+
+*********************************************************************************************************
+*********************************************************************************************************
+
+
+
+ND: (New flow)
+
+
+1. Campaign : 
+	a. Priority
+	b. Set Frequency (Deliver this campaign on specific days, specific time)
+	d. Exclude from Global limit
+	d. Fcap (deliver upto)
+		1. x times ever
+		2. x times per session
+		3. x times in y (seconds / minutes / hour / day / week)
+		4. AND condtion too (club above conditions)
+	e. Display rules
+		1. EXACTLY / EVERY x time
+		2. NO CLUBBING
+	// Delay not required
+
+2. Journeys : 
+	a. Priority
+	b. Set Frequency (Deliver this campaign on specific days, specific time)
+	c. How often 
+		1. Exclude from campaign limit
+		2. Once per session
+		3. Once per day
+		4. Once per user for the duration of this campaign
+
+
+
+
+*********************************************************************************************************
+*********************************************************************************************************
+
+
+Multiple NDs : 
+
+BE will send all the data irrespective of fcaps 
+
+Why ? 
+
+There can be 10 campaigns
+Each campaign can have 
+ - Exclude limits 
+ - Or fcaps / triggers 
+
+
+SDK updates counters on basis on NOTIF_VIEWED
+PRD: Frequency caps must be evaluated before campaign delivery.
+
+
+Solution : Entire Fcaps evaluation at SDK level 
+BE will send meta data reg counts (will be saved in TargetInfo)
+
+
+Global Fcap : 
+	a. x msg per session (SDK)
+	b. x msg per day (LC via TLC)
+
+
+Legacy (journey):
+	1. Exclude from campaign limit
+	2. Once per session (sdk)
+	3. Once per day (LC via TLC)
+	4. Once per user for the duration of this campaign (LC via TLC)
+
+
+"tlc" : [{campaign_id, lifetimeCount, dailyCount}]
+
+
+
+Advanced Fcap n triggers :  
+		1. x times ever
+		2. x times per session
+		3. x times in y (seconds / minutes / hour / day / week)
+		4. AND condtion too (club above conditions)
+	e. Display rules
+		1. EXACTLY / EVERY x time
+		2. NO CLUBBING
+
+
+already on SDK
+Controlled via whenTriggers, occurrenceLimits 
+
+
+SDK sends : inapps_evals
+
+
+
+
+
+
+
+
+
+
+
+
+*********************************************************************************************************
+*********************************************************************************************************
+
+
+
+Qst: 
+1. Since only SDK dependent, what about the case when user has 1+ devices
+2. PRD not mentioned
+	Do we need to implement ND fcaps n triggers for Journeys ?
+	1. PBS
+		1. If yes, there is PBS flow as well in journeys FYI
+		2. If yes, 2 options 
+			a. One at NB (before journey data is punched into profile) vs at LC app launched 
+			b. Best is to do at NB, can't take profile space unnecessarily, so complete resolutioning.	
+		3. reenter into journey
+	4. BE sends "whenTriggers" and "whenLimits" to SDK, how will it be possible in JOURNEY
+3. Last active by default (no action from User)
+4. No point of x times per second
+5. SDK version gating (camp n journey both)
+
+
+
+
+
+
+
+
+
+
+Charged event special handling
+
+Nested event props / list events 
+
+inapp_stale
+inapp_supressed (CG)
+
+Inapp : 
+
+1. App launched case : 
+	- lets say I 
+
+
+
+Keep in mind: 
+1. we have one feature flag in which - We support mulitple NDs at one event (if priority is same and we have more than one ND campaign, then we send all)
+2. we don't want any change in paytm's pull API flow
+
+In campaigns, as of now there are no fcaps
+So, we will give advacned fcaps and trigger option only
+bool newFlow = sdkVersion >=  minVersion && FF should be enabled
+Cases :
+1. newFlow false : old flow, no fcaps
+2. new Flow true, non-App Launched flow : 
+	a. BE will send meta like when triggers occurence limit etc to SDK at app launched, no content. when 	actual event happens, SDK will send adunit_eval (similar to inapp_eval) and BE will evalaute similarly to inapps (CG, stale, charged event special hanlding, etc)
+	b. SDK will evalulate fcaps (if any) and sent fcap / trigger related data to LC in _evals (campaign with no fcaps / triggers will not be added in this _evals key)
+	c. So we need to check for those cases too in which the campaign doesn't have advanced freq or triggers
+	d. If Multiple campaign ND FF is not enabled : 
+		- Current prod flow will be same.
+		- Get the highest priority campaign. If same, it automatically takes the oldest one.
+		- If this single campaign has fcaps / triggers -> check _evals list.
+		- Else NO OP.
+		- Return content data for that.
+	e. If Multiple campaign ND FF is enabled : 
+		- Current prod flow will be same.
+		- Get the highest priority campaign. If same, return all qualifiying 
+
+3. new Flow true, app launched case, BE will send the meta info and content too (adunit_meta and adunit_app_launched)
+
+
+
+
+
+
+SDK has following maps : 
+1. tlc map : 
+	- updates when NOTIF_VIEWED happens for a campaign 
+	- SDK updates the internal map
+2. When-trigger / occurrenceLimits map 
+	- whenever a event is made, these 2 maps are updated.
+
+SDK will check both tlc map and when/occurrenceLimits map before adding it to _evals.
+Every new campaign will 
+
+include global fcap or exclude fcap
+or
+(
+	advanced fcaps
+	and / or 
+	advacned trigger
+)
+
+
+
+1. Product behavoir when we have mulitple ND enabled
+2. Can be be mutually exclusive ?
+3. If consumer can consumer >=1 campaigns, then no advantaged of SDK checking TLC, we can keep it the same as in-apps.
+
+
+
+
+
+
+
+
+
+
+Fallback to lower priority 
+Considering same func in ND
+
+If sdk has logic, then BE needs to send always all the campaign data
+
+Else BE
+
+Can there be case jn which we have more than one ND being consumed 
+Evals sends the entire list
+Session limit be always sends, sdk discards
+App launched multiple sent count
+Events can be clubbed too
+Running campaign -> default ?
+I am assuming we get all the relevant campaigns in _evals
+
+
+Journeys vs Campaign priority normal case vs multiple ND case
+
+
+Advanced fcaps in journeys ?
+In doc, its mentioned data is sent to SDK at app launched 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

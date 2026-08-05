@@ -1,0 +1,52 @@
+
+
+
+Legacy fcaps : 
+
+
+1. Global fcaps : 	
+	a. x msg per session
+	b. x msg per day
+
+INAPP_MAX_PER_SESSION	ism	Account.getInAppMaxPerSession() (default 1)
+INAPP_MAX_PER_USER_PER_DAY	imp	Account.getInappMaxPerUserPerDay() (default 10)
+
+
+
+2. How often ? 
+	1. Exclude from campaign limit
+	2. Once per session
+	3. Once per day
+	4. Once per user for the duration of this campaign
+
+
+Field constant	                                    Mongo-key	Type	Semantics
+TargetingDao.INAPP_TGT_LIFETIME_COUNT	            tlc	int	            Once-per-lifetime cap. -1 = no cap, 1 = "once ever"
+TargetingDao.INAPP_TGT_DAILY_COUNT	                tdc	int	            Once-per-day cap. -1 = no cap, 1 = "once per day"
+TargetingDao.INAPP_TGT_EXCLUDE_FREQUENCY_CAP	    efc	int	            1 = exclude campaign from every cap (target + global)
+TargetingDao.MAX_PER_CAMPAIGN	                    mdc	string/int	    Per-session cap. Enforced SDK-side only
+
+
+
+
+
+"tlc": [
+  [targetId, todayCount, lifetimeCount]
+]
+
+
+
+// check to see whether the per day or the life time caps have been reached
+static boolean targetQuotaReached(TargetingInfo targetingInfo, int excludeFromFreqCaps,
+            int tgtLifeTimeCap, int tgtDailyCap, BasicDBList inappTargetUserCounts, int shownToday,
+            ProfileReach.Mode mode, Account account){ ...... }
+
+This will handle all the legacy fcaps
+
+
+
+
+
+
+
+
