@@ -1,0 +1,101 @@
+deliveryStrategySuppressionAppLaunchedSS — consolidated
+What it is
+
+The return leg of the App-Launched control-group flow. AppLaunchedSS sends suppressed stubs; this strategy receives the SDK's confirmation and turns it into a real event for LP.
+
+Emits no payload. Its entire output is DeliveryResult.suppressedEvents.
+
+Wiring
+@Named(DELIVERY_SUPPRESSION_APP_LAUNCHED_SS) @Singleton @Provides
+public InAppDelivery getDeliverySuppressionsAppLaunchedSS(
+        DeliveryTargetsAppLaunchedSS suppressionsTargets, TargetsUsageStatsHandler tracker) {
+    return new DeliveryStrategySuppressionsCS(
+            new MeteredDeliveryTargetsProvider(tracker, suppressionsTargets));
+}
+Class	DeliveryStrategySuppressionsCS — CS-era name, reused for SS. Same class backs DELIVERY_SUPPRESSION_CS (with DeliveryTargetsSuppressionsCS).
+Targets	DeliveryTargetsAppLaunchedSS — APP_LAUNCHED ∪ null-trigger, !isClientSide, != InstantEventClosure
+Wrapping	Metered only — no FilteredTargetsProvider. No SDK-capability filtering; you're matching an id the SDK already reported.
+When it runs
+if (!params.getInAppSuppressIds().isEmpty())
+    deliveries.add(deliveryStrategySuppressionAppLaunchedSS);
+
+Driven by meta.inapps_suppressed, which is request-level — parsed once by MobileAppRequestContainer.fillInAppsMeta and handed to every event's ProcessParams. So in a batch it's appended to each event's strategy list.
+
+The counter-intuitive bit
+
+It runs on a non-App-Launched request but looks up App-Launched targets.
+
+No App Launched event fires after an in-app is shown or suppressed, so the SDK reports it on its next event (Charged, say). That campaign isn't triggered by Charged, so an event-indexed lookup would miss it — hence the App-Launched provider.
+
+Body
+Map<Integer, TargetingInfo> targets = targetsProvider.fetchTargets(params).stream()
+        .collect(toMap(TargetingInfo::getID, identity(), (a, b) -> a));
+
+for (SuppressionMeta sm : params.getInAppSuppressIds()) {
+    TargetingInfo ti = targets.get(sm.getId());          // "77_20260830" → 77
+    if (ti != null && !params.getTargetsQualifiedSet().contains(ti.getID())) {
+        params.getTargetsQualifiedSet().add(ti.getID());
+        result.suppressedEvent(SuppressMeta.builder()
+                .suppressEvent(SuppressEvent.of(sm)).ti(ti).build());
+    }
+}
+
+Two guards: ti != null (an unknown or stopped campaign is silently dropped) and the targetsQualifiedSet claim.
+
+SuppressionMeta parses the id out of wzrk_id:
+
+getId()      → parseInt(wzrkId.split("_")[0])   // 77
+getBatchId() → parseInt(wzrkId.split("_")[1])   // 20260830
+What the strategy does not do
+
+It raises no event. It produces SuppressMeta objects. The conversion happens one layer up, in InAppProcessorAdapter.convertSuppressEvents:
+
+1. dedup against container.getSupplementaryRequests() by wzrk_id
+2. markSuppression(ti, ...) per survivor
+     → addToQualifiedJourneySteps(..., cgId)
+     → if ti.isEntryCriteria(): baseRequestDto.setTargetKey(key), setBatchId(batchId)
+3. LCUtils.createControlGroupEvent(...) per survivor
+
+producing a synthetic event:
+
+eventName = "Control Group"
+props     = { wzrk_id: "77_20260830", cg_type: "system"|"custom", wzrk_pivot: contentKey }
+
+then:
+
+returned from evalAndFillResponse
+  → container.addAllSupplementaryRequests(...)
+  → pushContainerToRedis(container)      // MobileAppServlet.onFinally
+  → LP (Log Processor) → ES
+
+LP = core/lp, the stage after LC: SDKs → LC → LP → ES → NB → delivery. LC never writes events itself; it queues them for LP.
+
+Double dedup — and why it's needed
+Guard	Scope
+targetsQualifiedSet (in the strategy)	request-wide claim
+existingSuppressionIds by wzrk_id (in convertSuppressEvents)	already-queued supplementary requests
+
+Both exist because the strategy is attached to every event in the batch — inapps_suppressed is request-level, the strategy list is per-event.
+
+Full round trip
+App Launched
+  AppLaunchedSS → CG = SUPPRESS (campaign) → PayloadProviderSuppressedCS
+    inapp_notifs_applaunched: [{ suppressed: true, wzrk_cgId: 3,
+                                 wzrk_id: "77_20260830", wzrk_pivot: "wzrk_default",
+                                 whenTriggers, frequencyLimits, occurrenceLimits, priority }]
+                                 ↑ rules so the SDK can decide   ↑ ids for the return trip
+
+  ...SDK evaluates locally, concludes it WOULD have displayed #77...
+
+next event (Charged)
+  meta.inapps_suppressed: [{wzrk_id: "77_20260830", wzrk_pivot: "wzrk_default", wzrk_cgId: 3}]
+    → this strategy      → SuppressMeta(ti77, SuppressEvent)
+    → adapter            → "Control Group" event
+    → supplementary req  → Redis → LP → ES
+Why the deferral exists at all
+
+For a journey, AppLaunchedSS records the suppression immediately — the server knows that in-app would have been the one shown.
+
+For a campaign it can't: App Launched pushes every eligible campaign, and the SDK shows at most one after applying local fcaps and occurrence limits. Recording at send time would over-count control-group impressions for campaigns the SDK never intended to show, corrupting the target-vs-control comparison.
+
+The TAN doc states it directly: "The server must register the suppression event after the SDK has determined that the in-app needs to be displayed." This strategy is that registration.

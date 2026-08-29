@@ -1,0 +1,78 @@
+
+Native display fcap :
+
+
+ND Stratergies :
+
+
+Multple ND : off
+
+1. deliveryStrategyMetaSS -> inapps_notifs_ss
+2. deliveryStrategySS -> inapps_notifs
+3. deliveryStrategyAppLaunchedSS -> inapp_notifs / inapp_notifs_app_launched
+4. deliveryStrategySuppressionAppLaunchedSS -> for raising supplementary events
+
+
+Multple ND : on
+
+batch vs single
+
+
+
+
+Test cases :
+
+Backward compatibility :
+1. The already ruuning campaigns should be excluded from fcaps by default
+	- There is one key called as isNDFcaps enabled, if this key is not present, BE should assume that these are old campaings so it should be treated as excludeFromFcaps.
+
+
+Multiple ND off :
+
+1. Non app launch targets :
+	- at app launch BE sends adunit_notifs_ss (trigger info)
+	- during event trigger : BE will send adunit_notifs / content_fetch  (any one, can be campaign / journey)
+	- handle single vs batch events
+	- single vs multi trigger cases
+	- CG handling at BE
+	- BE checks
+		- if target has advanceFcaps / trigger : then the target should be present in adunit_evals, else ignore the target
+		- If above thing passes, check for legacyFcaps (if excludeFromFcap is not true)
+	- BE marks the single target as mark as sent
+
+2. App launch targets :
+	- at time of app_launch BE will send (adunit_notifs(single journey, similar to inapp) / adunit_notifs_app_launched)
+		- **** in inapp, if the highest priority and oldest combinartion comes out to be journey, BE sends the data in inapp_notifs, else all the data in inapp_notifs_app_lauche
+	- BE marks all the targets as mark as sent
+	- SDK will show the campaign as per the fcaps
+	- If there is CG case, then SDK will send us adunit_suppressed, BE should consume this and raise subsequenct CG events
+
+3. WZRK_FETCH t = 7
+	- just send the meta over to SDK
+
+
+
+
+Multiple ND ON :
+
+1. Non app launch targets :
+	- at app launch BE sends adunit_notifs_ss (trigger info) - NO change whether flag ON / OFF
+	- during event trigger : BE will send adunit_notifs / content_fetch (all qualifying at highest priority, campaign / journey)
+	- handle single vs batch events
+	- single vs multi trigger cases
+	- CG handling at BE
+	- BE checks
+		- if target has advanceFcaps / trigger : then the target should be present in adunit_evals, else ignore the target
+		- If above thing passes, check for legacyFcaps (if excludeFromFcap is not true)
+	- BE marks the single target as mark as sent
+
+2. App launch targets :
+	- at time of app_launch BE will send (adunit_notifs(all journey) / adunit_notifs_app_launched(all campaigns) )
+		- **** discuss this once with SDK
+		- in inapp at AL event, it journey event wins, inapp_notifs is send, else campaing data in _app_launched (irrespective of target has adv fcaps selected or not)
+	- BE marks all the targets as mark as sent
+	- SDK will show the campaign as per the fcaps
+	- If there is CG case, then SDK will send us adunit_suppressed, BE should consume this and raise subsequenct CG events
+
+3. WZRK_FETCH t = 7
+	- just send the meta over to SDK

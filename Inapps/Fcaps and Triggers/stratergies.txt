@@ -1,0 +1,211 @@
+
+
+private Optional<InAppDelivery> getSS(ProcessParams params) {
+        List<InAppDelivery> deliveries = new ArrayList<>();
+        if (EventsHelper.inactionDeliveryRequested(params.getEventName(),
+                params.getEventProperties())) {
+            return Optional.of(deliveryStrategySSInactionContentFetch);
+        }
+
+        if (metaDeliveryRequested(params.getEventName(), params.getEventProperties())) {
+            // metadata for all SS campaign in-apps (no content)
+            deliveries.add(deliveryStrategyMetaSS);
+        }
+
+        if (APP_LAUNCHED.equals(params.getEventName())) {
+            // special handling for App Launched - return campaigns meta and content or one journey
+            deliveries.add(deliveryStrategyAppLaunchedSS);
+            // metadata for inaction App Launched campaigns
+            deliveries.add(deliveryStrategyAppLaunchedSSMeta);
+        } else {
+            // content requested from the SDK
+            deliveries.add(deliveryStrategySS);
+            deliveries.add(deliveryStrategySSInaction);
+        }
+
+        if (!params.getInAppSuppressIds().isEmpty()) {
+            // App Launched suppressions
+            deliveries.add(deliveryStrategySuppressionAppLaunchedSS);
+        }
+
+        return MergeDelivery.of(deliveries);
+    }
+
+----------------------------------------------------------------------------------------------------------------
+----------------------------------------------------------------------------------------------------------------
+
+Inapp Stratergies :
+
+1. deliveryStrategyMetaSS
+2. deliveryStrategySS
+3. deliveryStrategySSInaction
+4. deliveryStrategySSInactionContentFetch
+5. deliveryStrategySuppressionAppLaunchedSS
+6. deliveryStrategyAppLaunchedSS
+7. deliveryStrategyAppLaunchedSSMeta
+
+
+PayloadProvider:
+1. PayloadProviderCS
+2. PayloadProviderMetaSS
+3. PayloadProviderSS
+
+
+----------------------------------------------------------------------------------------------------------------
+----------------------------------------------------------------------------------------------------------------
+
+
+1. deliveryStrategyMetaSS
+
+PP : PayloadProviderMetaSS
+DeliveryTargetsProvider -> MeteredDeliveryTargetsProvider → FilteredTargetsProvider → DeliveryTargetsMetaSS
+
+ContentUtil's deps, for completeness:
+
+inapp_notifs_ss
+
+----------------------------------------------------------------------------------------------------------------
+
+
+2. deliveryStrategySS
+
+Serves one in-app with full content, for a specific trigger event. "First eligible wins."
+Output key: inapp_notifs. Runs on every event except App Launched.
+
+
+
+            // add to the global request collection of qualified targets
+            params.getTargetsQualifiedSet().add(ti.getID());
+
+
+
+Member					Declared			Concrete
+controlGroupSuppressor	concrete			ControlGroupSuppressor
+combinedQuotaCheck	    interface			InAppCombinedQuotaCheck
+inAppTargetEval			interface			InAppTargetEvalImpl (in core/lc)
+payloadProvider			concrete			PayloadProviderSS
+targetingProvider		interface			Metered(Filtered(**DeliveryTargetsSS**))
+
+// DeliveryTargetsSS
+t.getWebInAppNonNull(params.getEventName(), InApp, device).stream()
+    .filter(ti -> !ti.isClientSide())
+    .filter(ti -> ti.getTargetType() != TargetType.InstantEventClosure)     // ←
+    .sorted(comparing(getPriority, reverseOrder()).thenComparing(getID))
+
+
+----------------------------------------------------------------------------------------------------------------
+
+3. DeliveryStrategySSInaction
+
+Inaction = "user did not do X within N seconds". This strategy arms the timer; it doesn't deliver content.
+Output: inapp_notifs_meta, at most one. Runs on every non-App-Launched event, beside DeliveryStrategySS.
+
+
+Member				Declared								Concrete
+inAppTargetEval		interface								InAppTargetEvalImpl
+targetingProvider	@Named(DELIVERY_TARGETS_SS_INACTION)	Metered(Filtered(**DeliveryTargetsSSInaction**))
+fsClientUtils		concrete								InactionFSClientUtils (FStore, Context.ONLINE_INACTION)
+payloadProvider		concrete								PayloadProviderMetaSS — metadata only
+
+
+DeliveryTargetsSSInaction = this event's triggers, !CS, targetType == InstantEventClosure — the exact complement of DeliveryTargetsSS.
+
+// DeliveryTargetsSSInaction
+t.getWebInAppNonNull(params.getEventName(), InApp, device).stream()
+    .filter(ti -> !ti.isClientSide())
+    .filter(ti -> ti.getTargetType() == TargetType.InstantEventClosure)     // ←
+    .sorted(comparing(getPriority, reverseOrder()).thenComparing(getID))
+
+
+----------------------------------------------------------------------------------------------------------------
+
+4. deliveryStrategySSInactionContentFetch
+
+The fire side. SDK's inaction timer expired → sends wzrk_fetch with t=6 and tgtId in event props.
+Runs alone — getSS returns it immediately, no merge.
+Output: inapp_notifs (full content).
+
+
+Later dive in
+
+
+----------------------------------------------------------------------------------------------------------------
+
+
+5. DeliveryStrategyAppLaunchedSS
+
+The problem it solves: on the first launch after a campaign is created, the SDK doesn't know the campaign exists — so it can't ask for it via inapps_eval. Solution: on App Launched, push full content for every eligible campaign up front, and let the SDK pick.
+
+Output: inapp_notifs_applaunched (campaigns) or inapp_notifs (one journey).
+
+
+Member							Declared									Concrete
+targetingProvider				@Named(DELIVERY_TARGETS_APP_LAUNCH_SS)		Metered(Filtered(**DeliveryTargetsAppLaunchedSS**))
+payloadProvider					concrete									PayloadProviderSS — full content
+payloadProviderSuppressedCS		concrete									PayloadProviderSuppressedCS — the stub
+controlGroupSuppressor			concrete									ControlGroupSuppressor
+combinedQuotaCheck				@Named(COMBINED_QUOTA_CHECK)				InAppCombinedQuotaCheck
+inAppTargetEval					interface									InAppTargetEvalImpl
+
+
+Targets = APP_LAUNCHED ∪ null-trigger, !CS, != InstantEventClosure, sorted priority ↓, id ↑.
+Campaigns and journeys interleaved in one list.
+
+
+----------------------------------------------------------------------------------------------------------------
+
+6. DeliveryStrategyAppLaunchedSSMeta
+
+The inaction half of App Launched — exact complement of AppLaunchedSS on targetType.
+Output: inapp_notifs_applaunched_meta. Metadata only.
+
+Members
+Member	Concrete
+targetingProvider @Named(DELIVERY_TARGETS_APP_LAUNCH_SS_META)	Metered(Filtered(**DeliveryTargetsAppLaunchedSSMeta**))
+payloadProvider	PayloadProviderMetaSS
+inAppTargetEval	InAppTargetEvalImpl
+fsClientUtils	InactionFSClientUtils
+
+Targets = APP_LAUNCHED ∪ null-trigger, !CS, targetType == InstantEventClosure, priority ↓ / id ↑.
+
+isFreshLaunch is the extra bit: on a genuine cold start (fresh_launch in the App Launched event) it wipes every prior inaction qualification for the user and re-arms from scratch. Otherwise it only arms timers not already running.
+
+Note it also has no hasAdvancedRules / inapps_eval gate — same reason as AppLaunchedSS: on App Launched the SDK hasn't had a chance to ask.
+
+No control group, no quota — arming a timer isn't a send. Both run later in SSInactionContentFetch.
+
+The App Launched pair
+	normal	inaction
+targets	!= InstantEventClosure	== InstantEventClosure
+strategy	AppLaunchedSS	AppLaunchedSSMeta
+key	inapp_notifs_applaunched / inapp_notifs	inapp_notifs_applaunched_meta
+payload	full content	metadata
+
+
+
+
+
+----------------------------------------------------------------------------------------------------------------
+
+7. deliveryStrategySuppressionAppLaunchedSS
+
+
+Closes the loop opened by AppLaunchedSS's suppressed stubs. Emits no payload — only suppression events for LP.
+
+
+Class is DeliveryStrategySuppressionsCS — CS-era name, reused for SS. Same class also backs DELIVERY_SUPPRESSION_CS.
+Targets = DeliveryTargetsAppLaunchedSS (App-Launched ∪ null-trigger, !CS, != InstantEventClosure).
+Metered only — no FilteredTargetsProvider. No SDK-capability filtering; you're matching an id the SDK already reported.
+
+
+The one non-obvious thing
+
+It runs on a non-App-Launched request, but looks up App-Launched targets.
+
+No App Launched event fires after an in-app is shown or suppressed, so the SDK reports the suppression on its next event — Charged, say. The campaign isn't triggered by Charged, so a normal event lookup would miss it. Hence the App-Launched targets provider.
+
+
+
+
+
+
